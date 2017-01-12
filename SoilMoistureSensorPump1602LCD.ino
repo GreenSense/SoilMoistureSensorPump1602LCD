@@ -34,8 +34,10 @@ bool reverseSoilMoistureSensor = false;
 int wetReading = (reverseSoilMoistureSensor ? 0 : 1024);
 int dryReading = (reverseSoilMoistureSensor ? 1024 : 0);
 
-int dryReadingAddress = 0;
-int wetReadingAddress = 1;
+int flagAddress = 0;
+int thresholdAddress = 1;
+int dryReadingAddress = 2;
+int wetReadingAddress = 3;
 
 long lastDebounceTime = 0;
 long debounceDelay = 200;
@@ -71,7 +73,7 @@ int calibrationMode = CALIBRATION_MODE_OFF;
 long lastSerialOutputTime = 0;
 long serialOutputInterval = readingInterval;
 
-bool isDebug = false;
+bool isDebug = true;
 
 #define SERIAL_MODE_CSV 1
 #define SERIAL_MODE_QUERYSTRING 2
@@ -83,6 +85,9 @@ int serialMode = SERIAL_MODE_QUERYSTRING;
 #define PUMP_STATUS_AUTO 2
 
 int pumpStatus = PUMP_STATUS_AUTO;
+
+long lastThresholdChangeTime = 0;
+long thresholdChangeTimeout = 3000;
 
 void setup()
 {
@@ -103,15 +108,47 @@ void setup()
   pinMode(button7Pin, INPUT_PULLUP);
   pinMode(button8Pin, INPUT_PULLUP);
 
-  if (EEPROM.read(dryReadingAddress) != 0)
-    dryReading = getDryReading();
-  else
-    setDryReading(dryReading);
+  bool eepromIsSet = EEPROM.read(flagAddress) == 99;
 
-  if (EEPROM.read(wetReadingAddress) != 0)
+  if (eepromIsSet)
+  {
+    if (isDebug)
+    Serial.println("EEPROM has been set. Loading.");
+    dryReading = getDryReading();
     wetReading = getWetReading();
+    threshold = getThreshold();
+
+  }
   else
+  {
+    if (isDebug)
+      Serial.println("EEPROM is blank. Setting defaults.");
+    
+    setThreshold(threshold);
+    setDryReading(dryReading);
     setWetReading(wetReading);
+
+    setEEPROMFlag();
+  }
+  // TODO: Clean up
+  //if (EEPROM.read(thresholdAddress) != 0)
+  //Serial.print("Threshold: ");
+  //Serial.println(threshold);
+  //else
+  //  setThreshold(threshold);
+
+  //if (EEPROM.read(dryReadingAddress) == 255)
+  //  setDryReading(dryReading);
+  //else
+  //if (EEPROM.read(dryReadingAddress) != 0)
+  //else
+  //  setDryReading(dryReading);
+
+  //if (EEPROM.read(wetReadingAddress) == 255)
+  //  setWetReading(wetReading);
+  //else
+  //else
+  //  setWetReading(wetReading);
 
   lcd.init();
 
@@ -135,6 +172,8 @@ void loop()
   checkButton();
 
   checkCalibrationTimeout();
+
+  checkThresholdChangeTimeout();
 
   takeReading();
 
@@ -183,6 +222,10 @@ void checkCommand()
         Serial.println("Turning pump to auto");
         pumpStatus = PUMP_STATUS_AUTO;
         irrigateIfNeeded();
+        break;
+      case 'Z':
+        Serial.println("Toggling IsDebug");
+        isDebug = !isDebug;
         break;
     }
   }
@@ -259,6 +302,7 @@ void button1Pressed()
   if (calibrationMode == CALIBRATION_MODE_OFF)
   {
     threshold --;
+    lastThresholdChangeTime = millis();
     if (isDebug)
     {
       Serial.print("Threshold: " );
@@ -299,6 +343,7 @@ void button2Pressed()
   if (calibrationMode == CALIBRATION_MODE_OFF)
   {
     threshold ++;
+    lastThresholdChangeTime = millis();
     if (isDebug)
     {
       Serial.print("T: " );
@@ -409,21 +454,9 @@ void takeReading()
 
       lastReadingTime = millis();
 
-      int readingSum  = 0;
-      int totalReadings = 10;
+      moistureLevelRaw = getAverageReading();
 
-      for (int i = 0; i < totalReadings; i++)
-      {
-        int reading = analogRead(moisturePin);
-
-        readingSum += reading;
-      }
-
-      int averageReading = readingSum / totalReadings;
-
-      moistureLevelRaw = averageReading;
-
-      moistureLevel = calculateMoistureLevel(averageReading);
+      moistureLevel = calculateMoistureLevel(moistureLevelRaw);
 
       if (moistureLevel < 0)
         moistureLevel = 0;
@@ -438,6 +471,23 @@ void takeReading()
       }
     }
   }
+}
+
+double getAverageReading()
+{
+  int readingSum  = 0;
+  int totalReadings = 10;
+
+  for (int i = 0; i < totalReadings; i++)
+  {
+    int reading = analogRead(moisturePin);
+
+    readingSum += reading;
+  }
+
+  double averageReading = readingSum / totalReadings;
+
+  return averageReading;
 }
 
 int calculateMoistureLevel(int reading)
@@ -762,6 +812,7 @@ void checkCalibrationTimeout()
   }
 }
 
+
 void cancelCalibration()
 {
   calibrationMode = CALIBRATION_MODE_OFF;
@@ -769,17 +820,48 @@ void cancelCalibration()
   refreshDisplay();
 }
 
+void checkThresholdChangeTimeout()
+{
+  if (lastThresholdChangeTime + thresholdChangeTimeout < millis()
+      && lastThresholdChangeTime != 0)
+  {
+    setThreshold(threshold);
+
+    cancelThresholdChange();
+    Serial.println("Threshold change complete");
+
+  }
+}
+
+void cancelThresholdChange()
+{
+  lastThresholdChangeTime = 0;
+
+  // TODO: Remove if not needed
+  //refreshDisplay();
+}
+
+
 void setDryReading(int reading)
 {
   dryReading = reading;
 
   if (isDebug)
   {
-    Serial.print("Setting dry reading: ");
+    Serial.print("Setting dry reading to EEPROM: ");
     Serial.println(reading);
   }
 
-  EEPROM.write(dryReadingAddress, reading / 4); // Must divide by 4 to make it fit in eeprom
+  int compactValue = reading / 4;
+
+  // TODO: This is a messy work around. Is there a better way?
+  // Change to 254 because 255 indicates an empty EEPROM location
+  if (compactValue == 255)
+    compactValue = 254;
+
+  EEPROM.write(dryReadingAddress, compactValue); // Must divide by 4 to make it fit in eeprom
+
+  setEEPROMFlag();
 }
 
 void setWetReading(int reading)
@@ -788,30 +870,96 @@ void setWetReading(int reading)
 
   if (isDebug)
   {
-    Serial.print("Setting wet reading: ");
+    Serial.print("Setting wet reading to EEPROM: ");
     Serial.println(reading);
   }
 
-  EEPROM.write(wetReadingAddress, reading / 4); // Must divide by 4 to make it fit in eeprom
+  int compactValue = reading / 4;
+
+  EEPROM.write(wetReadingAddress, compactValue); // Must divide by 4 to make it fit in eeprom
+  
+  setEEPROMFlag();
 }
 
 int getDryReading()
 {
   int value = EEPROM.read(dryReadingAddress);
 
-  if (value == 255)
+  if (value == 0
+      || value == 255)
     return dryReading;
   else
-    return value * 4; // Must multiply by 4 to get the original value
+  {
+    int dryReading = value * 4; // Must multiply by 4 to get the original value
+
+    Serial.print("Dry reading found in EEPROM: ");
+    Serial.println(dryReading);
+
+    return dryReading;
+  }
 }
 
 int getWetReading()
 {
   int value = EEPROM.read(wetReadingAddress);
 
-  if (value == 255)
-    return wetReading;
+  //if (value == 255)
+  //  return wetReading;
+  //else
+  //{
+  int wetReading = value * 4; // Must multiply by 4 to get the original value
+
+  if (isDebug)
+  {
+    Serial.print("Wet reading found in EEPROM: ");
+    Serial.println(wetReading);
+  }
+
+  return wetReading;
+  //}
+}
+
+void setThreshold(int newThreshold)
+{
+  threshold = newThreshold;
+
+  if (isDebug)
+  {
+    Serial.print("Setting threshold to EEPROM: ");
+    Serial.println(threshold);
+  }
+
+  int compactValue = threshold / 4;
+
+  EEPROM.write(thresholdAddress, compactValue); // Must divide by 4 to make it fit in eeprom
+
+  setEEPROMFlag();
+}
+
+int getThreshold()
+{
+  int value = EEPROM.read(thresholdAddress);
+
+  if (value == 0
+      || value == 255)
+    return threshold;
   else
-    return value * 4; // Must multiply by 4 to get the original value
+  {
+    int threshold = value * 4; // Must multiply by 4 to get the original value
+
+    if (isDebug)
+    {
+      Serial.print("Threshold found in EEPROM: ");
+      Serial.println(threshold);
+    }
+
+    return threshold;
+  }
+}
+
+void setEEPROMFlag()
+{
+  if (EEPROM.read(flagAddress) != 99)
+    EEPROM.write(flagAddress, 99);
 }
 
