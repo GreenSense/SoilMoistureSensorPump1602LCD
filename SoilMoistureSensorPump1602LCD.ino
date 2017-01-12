@@ -73,7 +73,7 @@ int calibrationMode = CALIBRATION_MODE_OFF;
 long lastSerialOutputTime = 0;
 long serialOutputInterval = readingInterval;
 
-bool isDebug = true;
+bool isDebug = false;
 
 #define SERIAL_MODE_CSV 1
 #define SERIAL_MODE_QUERYSTRING 2
@@ -130,25 +130,6 @@ void setup()
 
     setEEPROMFlag();
   }
-  // TODO: Clean up
-  //if (EEPROM.read(thresholdAddress) != 0)
-  //Serial.print("Threshold: ");
-  //Serial.println(threshold);
-  //else
-  //  setThreshold(threshold);
-
-  //if (EEPROM.read(dryReadingAddress) == 255)
-  //  setDryReading(dryReading);
-  //else
-  //if (EEPROM.read(dryReadingAddress) != 0)
-  //else
-  //  setDryReading(dryReading);
-
-  //if (EEPROM.read(wetReadingAddress) == 255)
-  //  setWetReading(wetReading);
-  //else
-  //else
-  //  setWetReading(wetReading);
 
   lcd.init();
 
@@ -423,7 +404,6 @@ void button7Pressed()
   if (isDebug)
     Serial.println("Button 7 pressed");
 
-
   refreshDisplay();
 }
 
@@ -593,22 +573,30 @@ void displayReading()
 
 void displayFriendlyReading()
 {
-  lcd.print("Moisture: ");
+  if (calibrationMode == CALIBRATION_MODE_OFF)
+  {
+    lcd.print("Moisture: ");
+  }
+  
   lcd.print(moistureLevel);
   lcd.print("%");
-  // Enable the following code to show the raw value
-  //lcd.print(" (");
-  //lcd.print(moistureLevelRaw);
-  //lcd.print(")");
+  
+  if (calibrationMode != CALIBRATION_MODE_OFF)
+  {
+    lcd.print(" (");
+    lcd.print(moistureLevelRaw);
+    lcd.print(")");
+  }
 
   lcd.setCursor(0, 1);
+  
   if (pumpIsOn)
   {
     lcd.print("Pumping");
   }
   else if (calibrationMode == CALIBRATION_MODE_OFF)
   {
-    lcd.print("Trigger at: ");
+    lcd.print("Trigger: ");
     lcd.print(threshold);
     lcd.print("%   ");
     // Enable the following code to display the calibrated range
@@ -620,15 +608,11 @@ void displayFriendlyReading()
   {
     lcd.print("Dry: ");
     lcd.print(dryReading);
-    lcd.print("  Auto: ");
-    lcd.print(moistureLevelRaw);
   }
   else if (calibrationMode == CALIBRATION_MODE_WET)
   {
     lcd.print("Wet:");
     lcd.print(wetReading);
-    lcd.print("  Auto: ");
-    lcd.print(moistureLevelRaw);
   }
 }
 
@@ -683,7 +667,8 @@ void toggleScreenBacklight()
 /* Irrigation */
 void irrigateIfNeeded()
 {
-  if (pumpStatus == PUMP_STATUS_AUTO)
+  if (pumpStatus == PUMP_STATUS_AUTO
+    && calibrationMode == CALIBRATION_MODE_OFF)
   {
     bool readingHasBeenTaken = lastReadingTime > 0;
     bool pumpBurstFinished = pumpStartTime + pumpBurstDuration < millis();
@@ -808,7 +793,8 @@ void checkCalibrationTimeout()
       setWetReading(wetReading);
 
     cancelCalibration();
-    Serial.println("Calibration timed out");
+    
+    Serial.println("Calibration over");
   }
 }
 
@@ -828,19 +814,16 @@ void checkThresholdChangeTimeout()
     setThreshold(threshold);
 
     cancelThresholdChange();
-    Serial.println("Threshold change complete");
 
+    if (isDebug)
+      Serial.println("Threshold change complete");
   }
 }
 
 void cancelThresholdChange()
 {
   lastThresholdChangeTime = 0;
-
-  // TODO: Remove if not needed
-  //refreshDisplay();
 }
-
 
 void setDryReading(int reading)
 {
@@ -853,11 +836,6 @@ void setDryReading(int reading)
   }
 
   int compactValue = reading / 4;
-
-  // TODO: This is a messy work around. Is there a better way?
-  // Change to 254 because 255 indicates an empty EEPROM location
-  if (compactValue == 255)
-    compactValue = 254;
 
   EEPROM.write(dryReadingAddress, compactValue); // Must divide by 4 to make it fit in eeprom
 
@@ -891,9 +869,12 @@ int getDryReading()
   else
   {
     int dryReading = value * 4; // Must multiply by 4 to get the original value
-
-    Serial.print("Dry reading found in EEPROM: ");
-    Serial.println(dryReading);
+  
+    if (isDebug)
+    {
+      Serial.print("Dry reading found in EEPROM: ");
+      Serial.println(dryReading);
+    }
 
     return dryReading;
   }
@@ -903,10 +884,6 @@ int getWetReading()
 {
   int value = EEPROM.read(wetReadingAddress);
 
-  //if (value == 255)
-  //  return wetReading;
-  //else
-  //{
   int wetReading = value * 4; // Must multiply by 4 to get the original value
 
   if (isDebug)
@@ -916,7 +893,6 @@ int getWetReading()
   }
 
   return wetReading;
-  //}
 }
 
 void setThreshold(int newThreshold)
