@@ -8,4 +8,4 @@ if [ -z "$BRANCH" ]; then
     BRANCH="master"
 fi
 
-docker run -it -v $PWD:/easypost-src compulsivecoder/ubuntu-mono /bin/bash -c "git clone /easypost-src /easypost-dest/ && cd /easypost-dest/ && sh init.sh && sh build-and-test-all.sh $BRANCH"
+docker run -it -v $PWD:/SoilMoistureSensorPump1602LCD-src compulsivecoder/ubuntu-platformio /bin/bash -c "git clone /SoilMoistureSensorPump1602LCD-src /SoilMoistureSensorPump1602LCD-dest/ && cd /SoilMoistureSensorPump1602LCD-dest/ && sh init.sh && sh build.sh $BRANCH"
