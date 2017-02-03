@@ -1,9 +1,11 @@
+#include <Arduino.h>
+
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <EEPROM.h>
 
-//LiquidCrystal_I2C lcd(0x3F, 16, 2); // set the LCD address to 0x27 for a 16 chars and 2 line display
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal_I2C lcd(0x3F, 16, 2); // set the LCD address to 0x27 for a 16 chars and 2 line display
+//LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 long second = 1000;
 long minute = second * 60;
@@ -283,6 +285,8 @@ void button1Pressed()
   if (calibrationMode == CALIBRATION_MODE_OFF)
   {
     threshold --;
+    if (threshold < 2)
+      threshold = 2;
     lastThresholdChangeTime = millis();
     if (isDebug)
     {
@@ -293,6 +297,8 @@ void button1Pressed()
   else if (calibrationMode == CALIBRATION_MODE_DRY && calibrationTriggerTime + calibrationInterval > millis())
   {
     dryReading--;
+    if (dryReading < 0)
+      dryReading = 0;
     if (isDebug)
     {
       Serial.print("Dry reading: " );
@@ -304,6 +310,8 @@ void button1Pressed()
   else if (calibrationMode == CALIBRATION_MODE_WET && calibrationTriggerTime + calibrationInterval > millis())
   {
     wetReading--;
+    if (wetReading < 0)
+      wetReading = 0;
     if (isDebug)
     {
       Serial.print("Wet reading: " );
@@ -324,6 +332,9 @@ void button2Pressed()
   if (calibrationMode == CALIBRATION_MODE_OFF)
   {
     threshold ++;
+    if (threshold > 99)
+      threshold = 99;
+      
     lastThresholdChangeTime = millis();
     if (isDebug)
     {
@@ -334,6 +345,8 @@ void button2Pressed()
   else if (calibrationMode == CALIBRATION_MODE_DRY && calibrationTriggerTime + calibrationInterval > millis())
   {
     dryReading++;
+    if (dryReading > 1024)
+      dryReading = 1024;
     if (isDebug)
     {
       Serial.print("Dry reading: " );
@@ -345,6 +358,8 @@ void button2Pressed()
   else if (calibrationMode == CALIBRATION_MODE_WET && calibrationTriggerTime + calibrationInterval > millis())
   {
     wetReading++;
+    if (wetReading > 1024)
+      wetReading = 1024;
     if (isDebug)
     {
       Serial.print("Wet reading: " );
@@ -668,7 +683,8 @@ void toggleScreenBacklight()
 void irrigateIfNeeded()
 {
   if (pumpStatus == PUMP_STATUS_AUTO
-    && calibrationMode == CALIBRATION_MODE_OFF)
+    && calibrationMode == CALIBRATION_MODE_OFF
+    && lastThresholdChangeTime == 0)
   {
     bool readingHasBeenTaken = lastReadingTime > 0;
     bool pumpBurstFinished = pumpStartTime + pumpBurstDuration < millis();
@@ -793,8 +809,9 @@ void checkCalibrationTimeout()
       setWetReading(wetReading);
 
     cancelCalibration();
-    
-    Serial.println("Calibration over");
+
+    if (isDebug)
+      Serial.println("Calibration over");
   }
 }
 
