@@ -1,9 +1,9 @@
 sudo: required
 
-services:
-- docker
+language: python
+
+install:
+- sh prepare.sh
 
 script:
-- sh prepare.sh
-- sh init.sh
 - sh build.sh
